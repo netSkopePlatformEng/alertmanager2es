@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	log "github.com/sirupsen/logrus"
+	"io/ioutil"
 )
 
 type (
@@ -17,11 +18,12 @@ type (
 		// elasticsearch
 		Elasticsearch struct {
 			// ElasticSearch settings
-			Addresses []string `long:"elasticsearch.address"      env:"ELASTICSEARCH_ADDRESS"  delim:" "  description:"ElasticSearch urls" required:"true"`
-			Username  string   `long:"elasticsearch.username"     env:"ELASTICSEARCH_USERNAME"            description:"ElasticSearch username for HTTP Basic Authentication"`
-			Password  string   `long:"elasticsearch.password"     env:"ELASTICSEARCH_PASSWORD"            description:"ElasticSearch password for HTTP Basic Authentication" json:"-"`
-			ApiKey    string   `long:"elasticsearch.apikey"       env:"ELASTICSEARCH_APIKEY"              description:"ElasticSearch base64-encoded token for authorization; if set, overrides username and password" json:"-"`
-			Index     string   `long:"elasticsearch.index"        env:"ELASTICSEARCH_INDEX"               description:"ElasticSearch index name (placeholders: %y for year, %m for month and %d for day)" default:"alertmanager-%y.%m"`
+			Addresses  []string `long:"elasticsearch.address"      env:"ELASTICSEARCH_ADDRESS"  delim:" "  description:"ElasticSearch urls" required:"true"`
+			Username   string   `long:"elasticsearch.username"     env:"ELASTICSEARCH_USERNAME"            description:"ElasticSearch username for HTTP Basic Authentication"`
+			Password   string   `long:"elasticsearch.password"     env:"ELASTICSEARCH_PASSWORD"            description:"ElasticSearch password for HTTP Basic Authentication" json:"-"`
+			ApiKey     string   `long:"elasticsearch.apikey"       env:"ELASTICSEARCH_APIKEY"              description:"ElasticSearch base64-encoded token for authorization; if set, overrides username and password" json:"-"`
+			Index      string   `long:"elasticsearch.index"        env:"ELASTICSEARCH_INDEX"               description:"ElasticSearch index name (placeholders: %y for year, %m for month and %d for day)" default:"alertmanager-%y.%m"`
+			CaFileName string   `long:"elasticsearch.cafilename"   env:"ELASTICSEARCH_CAFILENAME"          description:"ElasticSearch CA file location" json:"-"`
 		}
 
 		// general options
@@ -35,4 +37,12 @@ func (o *Opts) GetJson() []byte {
 		log.Panic(err)
 	}
 	return jsonBytes
+}
+
+func (o *Opts) CACert() []byte {
+	cert, err := ioutil.ReadFile(o.Elasticsearch.CaFileName)
+	if err != nil {
+		log.Panic(err)
+	}
+	return cert
 }

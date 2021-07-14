@@ -1,3 +1,5 @@
 /vendor/
 /alertmanager2es
 *.exe
+.idea
+ca.cert
