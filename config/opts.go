@@ -40,6 +40,9 @@ func (o *Opts) GetJson() []byte {
 }
 
 func (o *Opts) CACert() []byte {
+	if o.Elasticsearch.CaFileName == "" {
+		return nil
+	}
 	cert, err := ioutil.ReadFile(o.Elasticsearch.CaFileName)
 	if err != nil {
 		log.Panic(err)
