@@ -158,23 +158,49 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 
 	now := time.Now()
 	msg.Timestamp = now.Format(time.RFC3339)
+	messages := msg.Copy()
+	for _, myMsg := range messages {
+		b, _ := json.MarshalIndent(myMsg, "", "  ")
+		log.Debugf(string(b))
 
-	incidentJson, _ := json.Marshal(msg)
+		incidentJson, _ := json.Marshal(myMsg)
 
-	req := esapi.IndexRequest{
-		Index: e.buildIndexName(now),
-		Body:  bytes.NewReader(incidentJson),
+		req := esapi.IndexRequest{
+			Index: e.buildIndexName(now),
+			Body:  bytes.NewReader(incidentJson),
+		}
+
+		res, err := req.Do(context.Background(), e.elasticSearchClient)
+		if err != nil {
+			e.prometheus.alertsInvalid.WithLabelValues().Inc()
+			err := fmt.Errorf("unable to insert document in elasticsearch")
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			log.Error(err)
+			return
+		}
+		defer res.Body.Close()
+		log.Debugf("Elastic: %v", res)
+
+		log.Debugf("received and stored alert: %v", msg.CommonLabels)
+		e.prometheus.alertsSuccessful.WithLabelValues().Inc()
 	}
-	res, err := req.Do(context.Background(), e.elasticSearchClient)
-	if err != nil {
-		e.prometheus.alertsInvalid.WithLabelValues().Inc()
-		err := fmt.Errorf("unable to insert document in elasticsearch")
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		log.Error(err)
-		return
-	}
-	defer res.Body.Close()
+}
 
-	log.Debugf("received and stored alert: %v", msg.CommonLabels)
-	e.prometheus.alertsSuccessful.WithLabelValues().Inc()
+func (e *AlertmanagerEntry) Copy() []FlatAlert {
+	var alertList []FlatAlert
+	for _, alertEntry := range e.Alerts {
+		var tempAlert FlatAlert
+		tempAlert.Version = e.Version
+		tempAlert.GroupLabels = e.GroupLabels
+		tempAlert.Alert = Alert{
+			Status:       alertEntry.Status,
+			Labels:       alertEntry.Labels,
+			Annotations:  alertEntry.Annotations,
+			StartsAt:     alertEntry.StartsAt,
+			EndsAt:       alertEntry.EndsAt,
+			GeneratorURL: alertEntry.GeneratorURL,
+		}
+		alertList = append(alertList, tempAlert)
+	}
+	return alertList
 }
