@@ -1,0 +1,52 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager2es
+  namespace: cattle-monitoring-system
+  labels:
+    app: alertmanager2es
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager2es
+  template:
+    metadata:
+      labels:
+        app: alertmanager2es
+    spec:
+      priorityClassName: system-node-critical
+      containers:
+        - name: alertmanager2es
+          image: artifactory-inap.netskope.io/pe-docker/alertmanager2es:v0.1
+          ports:
+            - containerPort: 9097
+          env:
+            - name: DEBUG
+              value: "true"
+            - name: VERBOSE
+              value: "true"
+            - name: ELASTICSEARCH_ADDRESS
+              value: "https://elastic.netskope.io"
+            - name: ELASTICSEARCH_PORT
+              value: "443"
+            - name: ELASTICSEARCH_USERNAME
+              value: elastic
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: elastic
+                  name: elasticsearch-es-elastic-user
+            - name: ELASTICSEARCH_CAFILENAME
+              value: /etc/pki/ca.crt
+          volumeMounts:
+            - mountPath: /etc/pki/
+              name: elasticsearch-certs
+              readOnly: true
+      volumes:
+        - name: elasticsearch-certs
+          secret:
+            defaultMode: 420
+            optional: false
+            secretName: elasticsearch-es-http-certs-public

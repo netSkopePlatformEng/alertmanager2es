@@ -1,0 +1,15 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager2es
+  namespace: cattle-monitoring-system
+  labels:
+    app: alertmanager2es
+spec:
+  selector:
+    app: alertmanager2es
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 9097
