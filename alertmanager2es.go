@@ -162,6 +162,7 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 
 	for _, myMsg := range messages {
 		func() {
+			myMsg.Timestamp = now
 			b, _ := json.MarshalIndent(myMsg, "", "  ")
 			log.Debugf(string(b))
 
@@ -203,6 +204,12 @@ func (e *AlertmanagerEntry) Copy() []FlatAlert {
 			EndsAt:       alertEntry.EndsAt,
 			GeneratorURL: alertEntry.GeneratorURL,
 		}
+		tempAlert.Status = e.Status
+		tempAlert.CommonLabels = e.CommonLabels
+		tempAlert.CommonAnnotations = e.CommonAnnotations
+		tempAlert.Receiver = e.Receiver
+		tempAlert.ExternalURL = e.ExternalURL
+		tempAlert.GroupKey = e.GroupKey
 		alertList = append(alertList, tempAlert)
 	}
 	return alertList

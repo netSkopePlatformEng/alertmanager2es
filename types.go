@@ -12,7 +12,7 @@ type FlatAlert struct {
 	ExternalURL       string            `json:"externalURL"`
 	Version           string            `json:"version"`
 	GroupKey          string            `json:"groupKey"`
-	Timestamp         string            `json:"@timestamp"`
+	Timestamp         time.Time         `json:"@timestamp"`
 }
 
 type Alert struct {
