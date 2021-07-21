@@ -45,6 +45,7 @@ func main() {
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 		},
+		CACert: opts.CACert(),
 	}
 	exporter.ConnectElasticsearch(cfg, opts.Elasticsearch.Index)
 
