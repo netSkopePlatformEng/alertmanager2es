@@ -4,16 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	elasticsearch "github.com/elastic/go-elasticsearch/v7"
-	"github.com/elastic/go-elasticsearch/v7/esapi"
-	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
 	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
+
+	elasticsearch "github.com/elastic/go-elasticsearch/v7"
+	"github.com/elastic/go-elasticsearch/v7/esapi"
+	"github.com/hashicorp/go-multierror"
+	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	log "github.com/sirupsen/logrus"
 )
 
 const supportedWebhookVersion = "4"
@@ -160,6 +162,7 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 	msg.Timestamp = now.Format(time.RFC3339)
 	messages := msg.Copy()
 
+	var merr error
 	for _, myMsg := range messages {
 		func() {
 			myMsg.Timestamp = now
@@ -176,9 +179,8 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 			res, err := req.Do(context.Background(), e.elasticSearchClient)
 			if err != nil {
 				e.prometheus.alertsInvalid.WithLabelValues().Inc()
-				err := fmt.Errorf("unable to insert document in elasticsearch")
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				log.Error(err)
+				merr = multierror.Append(merr, err)
+				log.Error(errors.Wrapf(err, "unable to insert document in elasticsearch"))
 				return
 			}
 			defer res.Body.Close()
@@ -187,6 +189,11 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 			log.Debugf("received and stored alert: %v", msg.CommonLabels)
 			e.prometheus.alertsSuccessful.WithLabelValues().Inc()
 		}()
+	}
+
+	if merr != nil {
+		http.Error(w, merr.Error(), http.StatusBadRequest)
+		return
 	}
 }
 
