@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/graymeta/gmkit/backoff"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -128,7 +129,7 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 		e.prometheus.alertsInvalid.WithLabelValues().Inc()
 		err := errors.New("got empty request body")
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		log.Error(err)
+		log.Error(errors.Wrap(err, "nil body"))
 		return
 	}
 
@@ -136,7 +137,7 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 	if err != nil {
 		e.prometheus.alertsInvalid.WithLabelValues().Inc()
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Error(err)
+		log.Error(errors.Wrap(err, "read body"))
 		return
 	}
 	defer r.Body.Close()
@@ -146,7 +147,7 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 	if err != nil {
 		e.prometheus.alertsInvalid.WithLabelValues().Inc()
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		log.Error(err)
+		log.Error(errors.Wrap(err, "unmarshal body"))
 		return
 	}
 
@@ -160,7 +161,13 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 
 	now := time.Now()
 	msg.Timestamp = now.Format(time.RFC3339)
-	messages := msg.Copy()
+	messages := msg.copy()
+
+	back := backoff.New(
+		backoff.InitBackoff(200*time.Millisecond),
+		backoff.MaxBackoff(1*time.Minute),
+		backoff.MaxCalls(4),
+	)
 
 	var merr error
 	for _, myMsg := range messages {
@@ -169,14 +176,24 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 			b, _ := json.MarshalIndent(myMsg, "", "  ")
 			log.Debugf(string(b))
 
-			incidentJson, _ := json.Marshal(myMsg)
+			incidentJson, err := json.Marshal(myMsg)
+			if err != nil {
+				e.prometheus.alertsInvalid.WithLabelValues().Inc()
+				merr = multierror.Append(merr, err)
+				log.Error(errors.Wrapf(err, "marshal error"))
+				return
+			}
 
 			req := esapi.IndexRequest{
 				Index: e.buildIndexName(now),
 				Body:  bytes.NewReader(incidentJson),
 			}
 
-			res, err := req.Do(context.Background(), e.elasticSearchClient)
+			var res *esapi.Response
+			err = back.Backoff(func() error {
+				res, err = req.Do(context.Background(), e.elasticSearchClient)
+				return err
+			})
 			if err != nil {
 				e.prometheus.alertsInvalid.WithLabelValues().Inc()
 				merr = multierror.Append(merr, err)
@@ -197,7 +214,7 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 	}
 }
 
-func (e *AlertmanagerEntry) Copy() []FlatAlert {
+func (e *AlertmanagerEntry) copy() []FlatAlert {
 	var alertList []FlatAlert
 	for _, alertEntry := range e.Alerts {
 		var tempAlert FlatAlert
