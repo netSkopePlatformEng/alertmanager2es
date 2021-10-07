@@ -4,16 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	elasticsearch "github.com/elastic/go-elasticsearch/v7"
-	"github.com/elastic/go-elasticsearch/v7/esapi"
-	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
+	"github.com/graymeta/gmkit/backoff"
 	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
+
+	elasticsearch "github.com/elastic/go-elasticsearch/v7"
+	"github.com/elastic/go-elasticsearch/v7/esapi"
+	"github.com/hashicorp/go-multierror"
+	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	log "github.com/sirupsen/logrus"
 )
 
 const supportedWebhookVersion = "4"
@@ -126,7 +129,7 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 		e.prometheus.alertsInvalid.WithLabelValues().Inc()
 		err := errors.New("got empty request body")
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		log.Error(err)
+		log.Error(errors.Wrap(err, "nil body"))
 		return
 	}
 
@@ -134,7 +137,7 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 	if err != nil {
 		e.prometheus.alertsInvalid.WithLabelValues().Inc()
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Error(err)
+		log.Error(errors.Wrap(err, "read body"))
 		return
 	}
 	defer r.Body.Close()
@@ -144,7 +147,7 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 	if err != nil {
 		e.prometheus.alertsInvalid.WithLabelValues().Inc()
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		log.Error(err)
+		log.Error(errors.Wrap(err, "unmarshal body"))
 		return
 	}
 
@@ -158,27 +161,43 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 
 	now := time.Now()
 	msg.Timestamp = now.Format(time.RFC3339)
-	messages := msg.Copy()
+	messages := msg.copy()
 
+	back := backoff.New(
+		backoff.InitBackoff(200*time.Millisecond),
+		backoff.MaxBackoff(1*time.Minute),
+		backoff.MaxCalls(4),
+	)
+
+	var merr error
 	for _, myMsg := range messages {
 		func() {
 			myMsg.Timestamp = now
 			b, _ := json.MarshalIndent(myMsg, "", "  ")
 			log.Debugf(string(b))
 
-			incidentJson, _ := json.Marshal(myMsg)
+			incidentJson, err := json.Marshal(myMsg)
+			if err != nil {
+				e.prometheus.alertsInvalid.WithLabelValues().Inc()
+				merr = multierror.Append(merr, err)
+				log.Error(errors.Wrapf(err, "marshal error"))
+				return
+			}
 
 			req := esapi.IndexRequest{
 				Index: e.buildIndexName(now),
 				Body:  bytes.NewReader(incidentJson),
 			}
 
-			res, err := req.Do(context.Background(), e.elasticSearchClient)
+			var res *esapi.Response
+			err = back.Backoff(func() error {
+				res, err = req.Do(context.Background(), e.elasticSearchClient)
+				return err
+			})
 			if err != nil {
 				e.prometheus.alertsInvalid.WithLabelValues().Inc()
-				err := fmt.Errorf("unable to insert document in elasticsearch")
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				log.Error(err)
+				merr = multierror.Append(merr, err)
+				log.Error(errors.Wrapf(err, "unable to insert document in elasticsearch"))
 				return
 			}
 			defer res.Body.Close()
@@ -188,9 +207,14 @@ func (e *AlertmanagerElasticsearchExporter) HttpHandler(w http.ResponseWriter, r
 			e.prometheus.alertsSuccessful.WithLabelValues().Inc()
 		}()
 	}
+
+	if merr != nil {
+		http.Error(w, merr.Error(), http.StatusBadRequest)
+		return
+	}
 }
 
-func (e *AlertmanagerEntry) Copy() []FlatAlert {
+func (e *AlertmanagerEntry) copy() []FlatAlert {
 	var alertList []FlatAlert
 	for _, alertEntry := range e.Alerts {
 		var tempAlert FlatAlert
