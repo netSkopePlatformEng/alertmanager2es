@@ -26,7 +26,6 @@ jobs:
           		-t ${{ secrets.ARTIFACTORY_ENDPOINT }}/pe-docker/${{ env.IMAGE }}:${{ env.VERSION }} \
                 -t ${{ secrets.FED_ARTIFACTORY_ENDPOINT }}/pe-docker/${{ env.IMAGE }}:${{ env.VERSION }} \
           		--build-arg ARTIFACTORY_ENDPOINT=${{ secrets.ARTIFACTORY_ENDPOINT }} \
-                --build-arg GITHUB_TOKEN=${{ secrets.GH_PAT }} \
                 --progress plain \
           		.
       - name: fedsource push
