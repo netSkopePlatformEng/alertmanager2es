@@ -2,7 +2,7 @@ name: docker-make
 on:
   push:
     branches:
-      - develop
+      - master
 jobs:
   docker:
     runs-on: [self-hosted, pe-org]
