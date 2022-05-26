@@ -1,0 +1,68 @@
+name: docker-make
+on:
+  push:
+    branches:
+      - develop
+jobs:
+  docker:
+    runs-on: [self-hosted, pe-org]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v2
+        env:
+          JF_ENV_1: ${{ secrets.JFROG_CLI_FEDSOURCE }}
+          JF_ENV_2: ${{ secrets.JFROG_CLI_COMMERCIAL }}
+
+      - name: Setup ENV
+        run: |
+          cat .env >> $GITHUB_ENV
+
+      - name: Docker Build
+        run: |
+          docker build --no-cache \
+          		-t ${{ secrets.ARTIFACTORY_ENDPOINT }}/pe-docker/${{ env.IMAGE }}:${{ env.VERSION }} \
+                -t ${{ secrets.FED_ARTIFACTORY_ENDPOINT }}/pe-docker/${{ env.IMAGE }}:${{ env.VERSION }} \
+          		--build-arg ARTIFACTORY_ENDPOINT=${{ secrets.ARTIFACTORY_ENDPOINT }} \
+                --build-arg GITHUB_TOKEN=${{ secrets.GH_PAT }} \
+                --progress plain \
+          		.
+      - name: fedsource push
+        run: |
+          jf c use fedsource
+          jf rt ping
+          jf rt bce alertmanager2es ${{ env.VERSION }}
+          jf rt bag alertmanager2es ${{ env.VERSION }}
+          jf rt dp ${{ secrets.FED_ARTIFACTORY_ENDPOINT }}/pe-docker/${{ env.IMAGE }}:${{ env.VERSION }} pe-docker --build-name=elastic-manage --build-number=${{ env.VERSION }}
+          jf rt bp alertmanager2es ${{ env.VERSION }}
+          jf rt bdi alertmanager2es --max-builds=10
+
+      - name: Commercial push
+        run: |
+          jf c use commercial
+          jf rt ping
+          jf rt bce alertmanager2es ${{ env.VERSION }}
+          jf rt bag alertmanager2es ${{ env.VERSION }}
+          jf rt dp ${{ secrets.ARTIFACTORY_ENDPOINT }}/pe-docker/${{ env.IMAGE }}:${{ env.VERSION }} pe-docker --build-name=elastic-manage --build-number=${{ env.VERSION }}
+          jf rt bp alertmanager2ese ${{ env.VERSION }}
+          jf rt bdi alertmanager2es --max-builds=10
+
+      - name: Jira Create EP Ticket
+        id: create_ticket
+        uses: atlassian/gajira-create@master
+        with:
+          project: EP
+          issuetype: Task
+          summary: |
+            Distribute artifacts for ${{ github.repository }}:${{ env.VERSION }} to fedhigh-prod and fedhigh-preprod
+          description: |
+            Please distribute the following from fedsource to fedhigh-preprod and fedhigh-prod Artifactories:
+            Docker Image(s):
+              pe-docker/${{ env.IMAGE }}:${{ env.VERSION }}
+          fields: '{"components": [{"id": "27945"}], "labels": ["k8s", "pe-docker"]}'
+          # 27945 is "fedramp-distribution"
+
+      - name: Jira Log Ticket
+        run: echo "::warning::Created Jira ticket ${{ steps.create_ticket.outputs.issue }}"
