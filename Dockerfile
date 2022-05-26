@@ -18,7 +18,7 @@ RUN ./alertmanager2es --help
 #############################################
 # FINAL IMAGE
 #############################################
-FROM gcr.io/distroless/static
+FROM artifactory-gcp.netskope.io/pe-docker/ns-ubuntu-2004-fips:latest
 ENV LOG_JSON=1
 COPY --from=build /go/src/github.com/webdevops/alertmanager2es/alertmanager2es /
 USER 1000
